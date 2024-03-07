@@ -2,7 +2,7 @@
 #' aggregated to a new ranking score. The score can be compared to the gene set
 #' ranking resulting from the standard GSEA.
 #'
-#' The functions included in the package are:
+#' So far the functions included in the package are:
 #' \itemize{
 #'   \item \code{\link{aggr.boot.GO}} Aggregate boostrap GO analysis
 #'   \item \code{\link{aggr.boot.Pathway}} Write a \code{genind} Aggregate boostrap pathway analysis
@@ -29,7 +29,6 @@
 #' @title Robustness evaluation of gene set enrichment analysis (GSEA)
 #' @keywords Robustness GSEA
 "_PACKAGE"
-NULL
 ##' Bootstrap GO analysis
 ##'
 ##' Performs bootstrap GO analysis.
