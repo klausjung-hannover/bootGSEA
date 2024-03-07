@@ -4,7 +4,7 @@ The R-package **bootGSEA** provides function to repeat GSEA using bootstrap samp
 
 **Installation**
 
-Eventually you first need to install the packages 'BiocManager' and 'ReactomePA'_
+Eventually, you first need to install the packages 'BiocManager' and 'ReactomePA'
 
 if (!require("BiocManager", quietly = TRUE))<br>
     install.packages("BiocManager")<br>
