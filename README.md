@@ -5,8 +5,8 @@ The R-package **bootGSEA** provides function to repeat GSEA using bootstrap samp
 Please use the following code in your R-environment:
 
 if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-    
+    install.packages("BiocManager")    
 BiocManager::install(version = "3.18")
-
 BiocManager::install("klausjung-hannover/bootGSEA")
+
+...or use the 
