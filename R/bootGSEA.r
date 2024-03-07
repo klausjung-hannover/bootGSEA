@@ -1,0 +1,650 @@
+#' Package contains functions that repeates GSEA using bootstrap samples of gene sets. Bootstrap results are
+#' aggregated to a new ranking score. The score can be compared to the gene set
+#' ranking resulting from the standard GSEA.
+#'
+#' The functions included in the package are:
+#' \itemize{
+#'   \item \code{\link{aggr.boot.GO}} Aggregate boostrap GO analysis
+#'   \item \code{\link{aggr.boot.Pathway}} Write a \code{genind} Aggregate boostrap pathway analysis
+#'   \item \code{\link{aggr.multiomics}} Multiomics Integration analysis
+#'   \item \code{\link{boot.GO}} Bootstrap GO analysis
+#'   \item \code{\link{boot.pathway}} Bootstrap Pathway analysis
+#'   \item \code{\link{compareRank}} Visualisation of bootstrap GO analyses
+#'   \item \code{\link{histDiff}} Visualization of difference in ranks
+#'   \item \code{\link{plotRank}} Visualisation of bootstrap pathway analyses
+#' }
+#'
+#' \tabular{ll}{
+#' Package: \tab bootGSEA\cr
+#' Type: \tab Package\cr
+#' Version: \tab 1.0\cr
+#' Date: \tab 2024-03-05\cr
+#' License: \tab GPL (>= 3)\cr
+#' }
+#'
+#' @author Shamini Hemandhar Kumar, Klaus Jung (\email{shamini.hemandhar.kumar@@tiho-hannover.de})(\email{klaus.jung@@tiho-hannover.de})
+#'
+#' Maintainer: Shamini Hemandhar Kumar (\email{shamini.hemandhar.kumar@@tiho-hannover.de})
+#' @aliases bootGSEA
+#' @title Robustness evaluation of gene set enrichment analysis (GSEA)
+#' @keywords Robustness GSEA
+"_PACKAGE"
+NULL
+##' Bootstrap GO analysis
+##'
+##' Performs bootstrap GO analysis.
+##' @title Bootstrap GO analysis
+##' @param sigGenes Vector coding for differentially expressed genes (value 1) and non-differentially expressed genes (value 0)
+##' @param gene2GO List containing GO-terms per gene
+##' @param B Number of bootstrap runs
+##' @param tau Percentage (between 0 and 1) of original size of GO-sets to be sampled for bootstrap analysis
+##' @param onto Either "BP" for biological process, "MF" for molecular function, or "CC" for cellular component
+##' @import topGO
+##' @import RobustRankAggreg
+##' @importFrom RobustRankAggreg aggregateRanks
+##' @importFrom methods new
+##' @importFrom topGO annFUN.gene2GO
+##' @importFrom topGO runTest
+##' @importFrom topGO GenTable
+##' @return A list containing the following items:
+##' \describe{
+##'   \item{nonbootresult}{Table with results of original GO analysis.}
+##'   \item{bootresult}{List of size B, where each element is the result of a bootstrap GO analysis.}
+##' }
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##' Alexa, A., & Rahnenführer, J. (2009). Gene set enrichment analysis with topGO. \emph{Bioconductor Improv}, strong{27}, 1-26. \url{https://mirrors.nju.edu.cn/bioconductor/3.2/bioc/vignettes/topGO/inst/doc/topGO.pdf}
+##' @export
+##' @examples
+##' library(RobustRankAggreg)
+##' library(topGO)
+##' d <- 10000 ### number of genes
+##' sigGenes.example <- rbinom(d, 1, 0.1)
+##' names(sigGenes.example) <- paste("gene", 1:d, sep="_")
+##' gene2GO.example <- vector(mode="list", length=d)
+##' names(gene2GO.example) <- names(sigGenes.example)
+##' GOs = paste("GO:000", 1000:9999, sep="")
+##' for (j in 1:d) gene2GO.example[[j]] <- sample(GOs, rnbinom(1, 1, 0.1),replace=FALSE)
+##' resultGO = boot.GO(sigGenes=sigGenes.example, gene2GO=gene2GO.example)
+boot.GO <- function(sigGenes, gene2GO, B=2, tau=0.95, onto="BP") {
+
+	print("Step1: non-bootstrap analysis")
+  d <- length(sigGenes)
+	GOdata0 <- methods::new("topGOdata",
+	                        ontology = onto,
+	                        allGenes = sigGenes,
+	                        geneSelectionFun = function(x)(x == 1),
+	                        annot = annFUN.gene2GO, gene2GO=gene2GO)
+	results.fisher0 <- topGO::runTest(GOdata0, algorithm="classic", statistic="fisher")
+	goEnrichment0 <- topGO::GenTable(GOdata0, Fis=results.fisher0, orderBy="fisher",
+	                          topNodes=length(results.fisher0@score),numChar=1000)
+
+	boot.results_GO <- vector(mode="list", length=B)
+	names(boot.results_GO) = paste("Bootstrap run", 1:B, sep="")
+	for (b in 1:B) {
+		print(paste("Bootstrap run:", b))
+		go_boot <- sample(sigGenes, tau*d, replace=FALSE)
+		GOdata <- methods::new("topGOdata",
+		                       ontology = onto,
+		                       allGenes = go_boot,
+		                       geneSelectionFun = function(x)(x == 1),
+		                       annot = annFUN.gene2GO, gene2GO=gene2GO)
+		results.fisher <- topGO::runTest(GOdata, algorithm="classic", statistic="fisher")
+		goEnrichment <- topGO::GenTable(GOdata, Fis=results.fisher, orderBy="fisher",
+		                         topNodes=length(results.fisher@score),numChar=1000)
+		boot.results_GO[[b]] <- goEnrichment
+	}
+	return(list(nonbootresult=goEnrichment0, bootresult=boot.results_GO))
+}
+
+##' Aggregation of bootstrap GO analyses
+##'
+##' Aggregates ranks from B bootstrap GO analyses
+##' @title Aggregate boostrap GO analysis
+##' @param resbootGO A list as generated by the function boot.GO
+##' @import topGO
+##' @import RobustRankAggreg
+##' @return A matrix containing the following columns: GO IDs, rank aggregation score, ranks from the non-bootstrap GO analysis, B colums with ranks from the bootstrap analyses
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##'	Kolde, R., Laur, S., Adler, P., & Vilo, J. (2012). Robust rank aggregation for gene list integration and meta-analysis. \emph{Bioinformatics}, \strong{28(4)}, 573-580. \url{https://doi.org/10.1093/bioinformatics/btr709}
+##' @export
+##' @examples
+##' library(RobustRankAggreg)
+##' library(topGO)
+##' d <- 10000 ### number of genes
+##' sigGenes.example <- rbinom(d, 1, 0.1)
+##' names(sigGenes.example) <- paste("gene", 1:d, sep="_")
+##' gene2GO.example <- vector(mode="list", length=d)
+##' names(gene2GO.example) <- names(sigGenes.example)
+##' GOs = paste("GO:000", 1000:9999, sep="")
+##' for (j in 1:d) gene2GO.example[[j]] <- sample(GOs, rnbinom(1, 1, 0.1),replace=FALSE)
+##' resultGO = boot.GO(sigGenes=sigGenes.example, gene2GO=gene2GO.example)
+##' resultAggr = aggr.boot.GO(resbootGO=resultGO)
+aggr.boot.GO <- function(resbootGO) {
+	B <- length(resbootGO[[2]])
+	rankedGO <- vector(mode="list", length=B)
+	for (b in 1:B) rankedGO[[b]] <- resbootGO[[2]][[b]]$GO.ID
+	rankScore <- RobustRankAggreg::aggregateRanks(glist=rankedGO)
+	rownames(rankScore) <- NULL
+
+	rankScore[,3] <- match(rankScore$Name, resbootGO[[1]]$GO.ID)
+	names(rankScore)[3] <- "rankRun_nonBoot"
+
+	for (b in 1:B) {
+		rankScore[,3+b] <- match(rankScore$Name, rankedGO[[b]])
+		names(rankScore)[3+b] <- paste("rankRun", b, sep="_")
+	}
+	return(rankScore)
+}
+
+##' Visualisation of bootstrap GO analyses
+##'
+##' Generates a plot for visualisation of bootstrap GO analyses
+##' @title Visualisation of bootstrap GO analyses
+##' @param aggrbootGO A table as returned by the function aggr.boot.GO
+##' @param lim Number of top ranked GO terms to be displayed in the plot
+##' @param ord Character with value "original" for ranking GO terms according to non-bootstrap GO analysis
+##' @param ident Boolean value. If true, the user is enabled to click and annotate GO terms in the plot
+##' @import topGO
+##' @import RobustRankAggreg
+##' @importFrom graphics abline
+##' @importFrom graphics points
+##' @importFrom graphics legend
+##' @importFrom graphics identify
+##' @return No return value
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##' Alexa, A., & Rahnenführer, J. (2009). Gene set enrichment analysis with topGO. \emph{Bioconductor Improv}, strong{27}, 1-26. \url{https://mirrors.nju.edu.cn/bioconductor/3.2/bioc/vignettes/topGO/inst/doc/topGO.pdf}
+##'	Kolde, R., Laur, S., Adler, P., & Vilo, J. (2012). Robust rank aggregation for gene list integration and meta-analysis. \emph{Bioinformatics}, \strong{28(4)}, 573-580. \url{https://doi.org/10.1093/bioinformatics/btr709}
+##' @export
+##' @examples
+##' library(RobustRankAggreg)
+##' library(topGO)
+##' d <- 10000 ### number of genes
+##' sigGenes.example <- rbinom(d, 1, 0.1)
+##' names(sigGenes.example) <- paste("gene", 1:d, sep="_")
+##' gene2GO.example <- vector(mode="list", length=d)
+##' names(gene2GO.example) <- names(sigGenes.example)
+##' GOs = paste("GO:000", 1000:9999, sep="")
+##' for (j in 1:d) gene2GO.example[[j]] <- sample(GOs, rnbinom(1, 1, 0.1),replace=FALSE)
+##' resultGO = boot.GO(sigGenes=sigGenes.example, gene2GO=gene2GO.example)
+##' resultAggr = aggr.boot.GO(resbootGO=resultGO)
+##' compareRank(aggrbootGO=resultAggr, lim=100, ord="original", ident=FALSE)
+compareRank <- function(aggrbootGO, lim=100, ord="original", ident=FALSE) {
+
+	if (ord=="original") {
+		o <- order(aggrbootGO$rankRun_nonBoot)
+		aggrbootGO <- aggrbootGO[o,]
+	}
+
+	N <- nrow(aggrbootGO)
+	x0 <- aggrbootGO$rankRun_nonBoot
+	y0 <- rank(aggrbootGO$Score)
+	x <- x0[1:lim]
+	y = y0[1:lim]
+	colo = rep(1, lim)
+	colo[which(x<y)] = 2
+	colo[which(x>y)] = 3
+	plot(x, y, cex.lab=1.5, cex.axis=1.5, xlab="Rank of non-bootstrap analysis",
+	     ylab="Rank of bootstrap score", col=colo)
+	graphics::abline(0, 1, col=4, lwd=2)
+	graphics::points(x, y, col=colo, lwd=2)
+	graphics::legend("topleft", c("loss", "same", "gain"), col=c(2, 1, 3), pch=15, cex=1.5)
+	if (ident==TRUE) graphics::identify(x, y, labels=aggrbootGO$Name[1:lim])
+}
+
+##' Visualisation of bootstrap analyses
+##'
+##' Generates a plot for visualisation of bootstrap pathway analyses
+##' @title Visualisation of bootstrap pathway analyses
+##' @param aggrboot A table with values for plot
+##' @param ordercolumn The column with which the table should be ordered
+##' @param ColumnA The rank column which has to be plotted along the x-axis
+##' @param ColumnB The rank column which has to be plotted along the y-axis
+##' @param title The title of the plot
+##' @param xlab x-axis label
+##' @param ylab y-axis label
+##' @param ord Character with value "standard" for ranking pathways according to ordercolumn
+##' @import ggplot2
+##' @importFrom dplyr case_when
+##' @importFrom dplyr mutate
+##' @importFrom dplyr %>%
+##' @importFrom ggplot2 ggplot
+##' @importFrom ggplot2 theme_set
+##' @importFrom ggplot2 theme_bw
+##' @importFrom ggplot2 aes
+##' @importFrom ggplot2 geom_point
+##' @importFrom ggplot2 labs
+##' @importFrom ggplot2 theme
+##' @importFrom ggplot2 element_text
+##' @importFrom ggplot2 geom_rug
+##' @importFrom ggplot2 facet_wrap
+##' @return No return value
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##'	Wickham H (2016). \emph{ggplot2: Elegant Graphics for Data Analysis}. Springer-Verlag New York. ISBN 978-3-319-24277-4, \url{https://ggplot2.tidyverse.org}
+##'	Wickham H, François R, Henry L, Müller K (2022). \emph{dplyr: A Grammar of Data Manipulation}. R package version 1.0.9, \url{https://CRAN.R-project.org/package=dplyr}
+##' @export
+##' @examples
+##' require(RobustRankAggreg)
+##' require(topGO)
+##' require(dplyr)
+##' require(clusterProfiler)
+##' require(ReactomePA)
+##' require(ggplot2)
+##' genelist_T <- rnorm(10000)
+##' names(genelist_T) <- paste( 10000:19999, sep="")
+##' genelist_P <- rnorm(10000)
+##' names(genelist_P) <- paste( 10000:19999, sep="")
+##' resultpathway_T = boot.pathway(sigGenes=genelist_T , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr_T = aggr.boot.Pathway(resbootpathway = resultpathway_T)
+##' resultpathway_P = boot.pathway(sigGenes=genelist_P , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr_P = aggr.boot.Pathway(resbootpathway = resultpathway_P)
+##' Compareomics = aggr.multiomics(resultAggr_T = resultAggr_T,
+##'  resultAggr_P = resultAggr_P)
+##' Compareomics <- left_join(Compareomics,
+##' resultAggr_T %>% dplyr::select(Name,rankRun_nonBoot, Score),
+##' by = "Name")
+##' colnames(Compareomics) = c("Name", "IntegratedScore",
+##'  "RankTrans", "RankProt", "rankRun_nonBoot_T", "Score_T")
+##' Compareomics <- left_join(Compareomics,
+##' resultAggr_P %>% dplyr::select(Name,rankRun_nonBoot, Score),by = "Name")
+##' colnames(Compareomics) = c("Name", "IntegratedScore", "RankTrans", "RankProt",
+##'  "rankRun_nonBoot_T", "Score_T", "rankRun_nonBoot_P", "Score_P")
+##' plotRank(aggrboot = Compareomics, ordercolumn = "IntegratedScore",
+##'  ColumnA = "rankRun_nonBoot_T", ColumnB = "RankTrans", title = "Rank comparison",
+##'   xlab = "Standard Enrichment analysis", ylab = "Bootstrapped enrichment analysis")
+plotRank <- function(aggrboot, ordercolumn, ColumnA, ColumnB, ord="standard",
+                     title = "", xlab = "", ylab = "" ){
+  if (ord=="standard") {
+    o <- order(aggrboot[[ordercolumn]])
+    aggrboot <- aggrboot[o,]
+  }
+  N<- nrow(aggrboot)
+  x0 <- aggrboot[[ColumnA]]
+  y0 <- aggrboot[[ColumnB]]
+  Robustness <- NULL
+  aggrboot <- (aggrboot %>%
+                   dplyr::mutate(Robustness = dplyr::case_when(
+                     (x0<y0) ~ "Loss",
+                     (x0>y0) ~ "Gain",
+                     (x0==y0)~ "Same")))
+  ggplot2::theme_set(ggplot2::theme_bw())
+  p1<- ggplot2::ggplot(aggrboot,
+                       ggplot2::aes(x = x0, y = y0,
+                  color = Robustness, shape = Robustness)) +
+    ggplot2::geom_point()+
+    scale_color_manual(values=c("#E69F00", "cyan4", "gray28"))+      #56B4E9 #999999
+    ggplot2::labs(x = xlab,
+         y = ylab,
+         title = title)+
+    ggplot2::theme(axis.text = ggplot2::element_text(color = "black",
+                                                     size = 10),
+          axis.title = ggplot2::element_text(size = 12, color = "black",
+                                    face = "bold"),
+          plot.title = ggplot2::element_text(face = "bold",
+                                    size = 14))+
+    ggplot2::geom_rug()
+  p2 <-ggplot2::ggplot(aggrboot, ggplot2::aes(x = x0, y = y0)) +
+    ggplot2::geom_point(color = "gray28", alpha = .3) +
+    ggplot2::labs(x = xlab, y = ylab) +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, vjust = 1,
+                                                       hjust = 1),
+                   axis.title = ggplot2::element_text(size = 12,
+                                                      color = "black",
+                                                      face = "bold"))
+
+  p2<- p2 + ggplot2::facet_wrap(~ Robustness, scales = "free")
+  p1 / p2
+}
+
+##' Bootstrap Pathway analysis
+##'
+##' Performs bootstrap Pathway analysis for KEGG, Reactome and Wiki Pathways
+##' @title Bootstrap Pathway analysis
+##' @param sigGenes Vector coding for entrez ids with logfc values
+##' @param B Number of bootstrap runs
+##' @param tau Percentage (between 0 and 1) of actual size of genelist to be sampled for bootstrap analysis
+##' @param org Organism of the genelist to be analysed
+##' @param pathway One of 'KEGG', 'Reactome' and 'Wiki' pathways
+##' @import RobustRankAggreg
+##' @importFrom RobustRankAggreg aggregateRanks
+##' @importFrom clusterProfiler gseKEGG
+##' @importFrom ReactomePA gsePathway
+##' @importFrom clusterProfiler gseWP
+##' @return A list containing the following items:
+##' \describe{
+##'   \item{nonbootresult}{Table with results of standard enrichment analysis.}
+##'   \item{bootresult}{List of size B, where each element is the result of a bootstrap pathway analysis.}
+##' }
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##' T Wu, E Hu, S Xu, M Chen, P Guo, Z Dai, T Feng, L Zhou, W Tang, L Zhan, X Fu, S Liu, X Bo, and G Yu. clusterProfiler 4.0: A universal enrichment tool for interpreting omics data. The Innovation. 2021, 2(3):100141 \url{https://bioconductor.org/packages/release/bioc/html/clusterProfiler.html}
+##' Guangchuang Yu, Qing-Yu He. ReactomePA: an R/Bioconductor package for reactome pathway analysis and visualization.Molecular BioSystems 2016, 12(2):477-479 \url{https://bioconductor.org/packages/release/bioc/html/ReactomePA.html}
+##' @export
+##' @examples
+##' require(RobustRankAggreg)
+##' require(clusterProfiler)
+##' require(ReactomePA)
+##' genelist <- rnorm(10000) #example for boot.pathway
+##' names(genelist) <- paste( 10000:19999, sep="")
+##' resultpathway = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr = aggr.boot.Pathway(resbootpathway = resultpathway)
+##' compareRank(aggrbootGO=resultAggr, lim=100, ord="original", ident=FALSE)
+boot.pathway <- function(sigGenes, B=2, tau=0.95, org = 'mouse',
+                         pathway = 'Reactome') {
+
+  print("Step1: non-bootstrap analysis")
+  sigGenes <- sort(sigGenes, decreasing = TRUE)
+  d <- length(sigGenes)
+  if(pathway == 'KEGG') {
+    KEGG_std <- suppressWarnings(clusterProfiler::gseKEGG(geneList   = sigGenes,
+                                                          organism     = org,
+                                                          minGSSize    = 5,
+                                                          pvalueCutoff = 1,
+                                                          verbose      = TRUE))
+    KEGG_std <- data.frame(KEGG_std)
+
+    boot.results_KEGG <- vector(mode="list", length=B)
+    names(boot.results_KEGG) = paste("Bootstrap run", 1:B, sep="")
+    for (b in 1:B) {
+      print(paste("Bootstrap run:", b))
+      sigGenes_boot <- sample(sigGenes, tau*d, replace=FALSE)
+      sigGenes_boot <- sort(sigGenes_boot, decreasing = TRUE)
+      KEGG <- suppressWarnings(clusterProfiler::gseKEGG(geneList= sigGenes_boot,
+                                                        organism     = org,
+                                                        minGSSize    = 5,
+                                                        pvalueCutoff = 1,
+                                                        verbose      = TRUE))
+      KEGG <- data.frame(KEGG)
+      boot.results_KEGG[[b]] = KEGG
+    }
+    return(list(nonbootresult=KEGG_std, bootresult=boot.results_KEGG))
+  }
+
+  if(pathway == 'Reactome'){
+    Reactome_std <- suppressWarnings(ReactomePA::gsePathway(sigGenes,
+                                                            organism = org,
+                                                            pvalueCutoff = 1,
+                                                            pAdjustMethod= "BH",
+                                                            verbose = TRUE))
+    Reactome_std <- data.frame(Reactome_std)
+    boot.results_reactome <- vector(mode="list", length=B)
+    names(boot.results_reactome) = paste("Bootstrap run", 1:B, sep="")
+    for (b in 1:B) {
+      print(paste("Bootstrap run:", b))
+      sigGenes_boot <- sample(sigGenes, tau*d, replace=FALSE)
+      sigGenes_boot <- sort(sigGenes_boot, decreasing = TRUE)
+      Reactome <- suppressWarnings(ReactomePA::gsePathway(sigGenes_boot,
+                                                          organism = org,
+                                                          pvalueCutoff = 1,
+                                                          pAdjustMethod = "BH",
+                                                          verbose = TRUE))
+      Reactome <- data.frame(Reactome)
+      boot.results_reactome[[b]] = Reactome
+    }
+    return(list(nonbootresult=Reactome_std, bootresult=boot.results_reactome))
+  }
+
+  if(pathway == 'Wiki'){
+    Wiki_std <- suppressWarnings(clusterProfiler::gseWP(sigGenes,organism = org,
+                                       pvalueCutoff = 1))
+    Wiki_std <- data.frame(Wiki_std)
+    boot.results_wiki <- vector(mode="list", length=B)
+    names(boot.results_wiki) = paste("Bootstrap run", 1:B, sep="")
+    for (b in 1:B) {
+      print(paste("Bootstrap run:", b))
+      sigGenes_boot <- sample(sigGenes, tau*d, replace=FALSE)
+      sigGenes_boot <- sort(sigGenes_boot, decreasing = TRUE)
+      Wiki <-suppressWarnings(clusterProfiler::gseWP(sigGenes_boot,organism=org,
+                                     pvalueCutoff = 1))
+      Wiki <- data.frame(Wiki)
+      boot.results_wiki[[b]] = Wiki
+    }
+    return(list(nonbootresult=Wiki_std, bootresult=boot.results_wiki))
+  }
+}
+
+##' Aggregation of bootstrap pathway analyses
+##'
+##' Aggregates ranks from B bootstrap pathway analyses
+##' @title Aggregate boostrap pathway analysis
+##' @param resbootpathway A list as generated by the function boot.pathway
+##' @import RobustRankAggreg
+##' @importFrom RobustRankAggreg aggregateRanks
+##' @return A matrix containing the following columns: IDs, rank aggregation score, ranks from the non-bootstrap pathway analysis, B columns with ranks from the bootstrap analyses
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##'	Kolde, R., Laur, S., Adler, P., & Vilo, J. (2012). Robust rank aggregation for gene list integration and meta-analysis. \emph{Bioinformatics}, \strong{28(4)}, 573-580. \url{https://doi.org/10.1093/bioinformatics/btr709}
+##' @export
+##' @examples
+##' require(RobustRankAggreg)
+##' require(clusterProfiler)
+##' require(ReactomePA)
+##' genelist <- rnorm(10000) #example for boot.pathway
+##' names(genelist) <- paste( 10000:19999, sep="")
+##' resultpathway = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr = aggr.boot.Pathway(resbootpathway = resultpathway)
+##' compareRank(aggrbootGO=resultAggr, lim=100, ord="original", ident=FALSE)
+aggr.boot.Pathway <- function(resbootpathway) {
+  B <- length(resbootpathway[[2]])
+  rankedpathway <- vector(mode="list", length=B)
+  for (b in 1:B) rankedpathway[[b]] <- resbootpathway[[2]][[b]]$ID
+  rankScore <- RobustRankAggreg::aggregateRanks(glist=rankedpathway)
+  rownames(rankScore) <- NULL
+
+  rankScore[,3] <- match(rankScore$Name, resbootpathway[[1]]$ID)
+  names(rankScore)[3] <- "rankRun_nonBoot"
+
+  for (b in 1:B) {
+    rankScore[,3+b] <- match(rankScore$Name, rankedpathway[[b]])
+    names(rankScore)[3+b] <- paste("rankRun", b, sep="_")
+  }
+  return(rankScore)
+}
+
+##' Multiomics Integration analysis
+##'
+##' Aggregates ranks from Multiomics data
+##' @title Multiomics Integration analysis
+##' @param resultAggr_T A table as returned by the function aggr.boot.GO or aggr.boot.Pathway
+##' @param resultAggr_P A table as returned by the function aggr.boot.GO or aggr.boot.Pathway
+##' @import RobustRankAggreg
+##' @importFrom RobustRankAggreg aggregateRanks
+##' @importFrom RobustRankAggreg rankMatrix
+##' @return A matrix containing the following columns: IDs, Integrated aggregation score, Individual omics ranks
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##'	Kolde, R., Laur, S., Adler, P., & Vilo, J. (2012). Robust rank aggregation for gene list integration and meta-analysis. \emph{Bioinformatics}, \strong{28(4)}, 573-580. \url{https://doi.org/10.1093/bioinformatics/btr709}
+##' @export
+##' @examples
+##' require(RobustRankAggreg)
+##' require(clusterProfiler)
+##' require(ReactomePA)
+##' genelist <- rnorm(10000) #example for boot.pathway
+##' names(genelist) <- paste( 10000:19999, sep="")
+##' resultpathway = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr = aggr.boot.Pathway(resbootpathway = resultpathway)
+##' compareRank(aggrbootGO=resultAggr, lim=100, ord="original", ident=FALSE)
+##' genelist_T <- rnorm(10000)
+##' names(genelist_T) <- paste( 10000:19999, sep="")
+##' genelist_P <- rnorm(10000)
+##' names(genelist_P) <- paste( 10000:19999, sep="")
+##' resultpathway_T = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr_T = aggr.boot.Pathway(resbootpathway = resultpathway_T)
+##' resultpathway_P = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+##'  org = 'mouse', pathway = 'Reactome')
+##' resultAggr_P = aggr.boot.Pathway(resbootpathway = resultpathway_P)
+##' Compareomics = aggr.multiomics(resultAggr_T = resultAggr_T, resultAggr_P = resultAggr_P)
+aggr.multiomics <- function(resultAggr_T, resultAggr_P) {
+  L = vector(mode="list", length=2)
+  L[[1]] = resultAggr_T$Name
+  L[[2]] = resultAggr_P$Name
+  A = RobustRankAggreg::aggregateRanks(glist=L)
+  r = RobustRankAggreg::rankMatrix(L, full = TRUE)
+  r[,1] = r[,1] * lengths(L)[1]
+  r[,2] = r[,2] * lengths(L)[2]
+  index = match(rownames(A), rownames(r))
+  r = r[index,]
+  colnames(r) = c("RankTrans", "RankProt")
+  IntegratedAggreg = cbind(A, r)
+  colnames(IntegratedAggreg) =c("Name","IntegratedScore","RankTrans","RankProt")
+  return(IntegratedAggreg)
+}
+
+##' Visualization of rank difference
+##'
+##' Visualizes difference in ranks between standard and bootstrapped analyses
+##' @title Visualization of difference in ranks
+##' @param standardRank The standard rank column of omics analysis
+##' @param bootstrappedRank The bootstrapped rank column of omics analysis
+##' @param title Title of the histogram
+##' @param xlab Title of the xaxis
+##' @param ylab Title of the yaxis
+##' @param binwidth Width of the bins
+##' @param lowerq lower quantile threshold
+##' @param upperq upper quantile threshold
+##' @import dplyr
+##' @import ggplot2
+##' @importFrom dplyr %>%
+##' @importFrom dplyr summarize
+##' @importFrom ggplot2 theme_set
+##' @importFrom ggplot2 theme_bw
+##' @importFrom ggplot2 ggplot
+##' @importFrom ggplot2 aes
+##' @importFrom ggplot2 geom_histogram
+##' @importFrom ggplot2 geom_density
+##' @importFrom ggplot2 geom_vline
+##' @importFrom ggplot2 geom_text
+##' @importFrom ggplot2 labs
+##' @importFrom graphics hist
+##' @importFrom graphics points
+##' @importFrom stats quantile
+##' @importFrom stats density
+##' @return No return value
+##' @author Shamini Hemandhar Kumar, Klaus Jung
+##' @references
+##'	Wickham H (2016). \emph{ggplot2: Elegant Graphics for Data Analysis}. Springer-Verlag New York. ISBN 978-3-319-24277-4, \url{https://ggplot2.tidyverse.org}
+##'	Wickham H, François R, Henry L, Müller K (2022). \emph{dplyr: A Grammar of Data Manipulation}. R package version 1.0.9, \url{https://CRAN.R-project.org/package=dplyr}
+##' @export
+##' @examples
+##' require(RobustRankAggreg)
+##'require(topGO)
+##'require(ggplot2)
+##'require(dplyr)
+##'d <- 10000 ### number of genes
+##'sigGenes.example <- rbinom(d, 1, 0.1)
+##'names(sigGenes.example) <- paste("gene", 1:d, sep="_")
+##'gene2GO.example <- vector(mode="list", length=d)
+##'names(gene2GO.example) <- names(sigGenes.example)
+##'GOs = paste("GO:000", 1000:9999, sep="")
+##'for (j in 1:d) gene2GO.example[[j]] <- sample(GOs, rnbinom(1, 1, 0.1),replace=FALSE)
+##'resultGO = boot.GO(sigGenes=sigGenes.example, gene2GO=gene2GO.example)
+##'resultAggr = aggr.boot.GO(resbootGO=resultGO)
+##'stdrank <- resultAggr$rankRun_nonBoot
+##'bootrank <- rank(resultAggr$Score)
+##'histDiff(standardRank = stdrank, bootstrappedRank = bootrank, title = "",
+##' xlab = "Rank difference (standard-bootstrap)", ylab = "Frequency", binwidth = 15,
+##'  lowerq = .025, upperq = .975)
+
+histDiff <- function (standardRank, bootstrappedRank, title = "", xlab = "",
+                      ylab = "", binwidth = 5, lowerq = .025, upperq = .975) {
+  x <- standardRank-bootstrappedRank
+  x <- x[!is.na(x)]
+  den <- stats::density(x)
+  H1 = hist(x, freq=FALSE, ylim = c(0, max(den$y)))
+  points(den$x, den$y, type="l")
+  f = max(H1$counts)/max(H1$density)
+  x <- data.frame(x)
+  lower <- upper <- NULL
+  d2 <- x %>%
+    dplyr::summarize(lower = stats::quantile(x, probs = lowerq),
+                     upper = stats::quantile(x, probs = upperq))
+  ggplot2::theme_set(theme_bw())
+  H2 = ggplot2::ggplot(x, aes(x=x)) +
+    ggplot2::geom_histogram( colour="black", fill="#999999", binwidth=binwidth)+
+    ggplot2::geom_density(aes(y=after_stat(density)*f),alpha=.2,fill="#FF6666")+
+    ggplot2::geom_vline(data = d2, aes(xintercept = lower), linetype = 2) +
+    ggplot2::geom_text(data=d2, mapping=aes(x=round(lower,1), y=0,
+                                            label=round(lower,1)),
+                       size=4, angle=360, vjust=-20, hjust=1.1)+
+    ggplot2::geom_vline(data = d2,aes(xintercept = upper),linetype = 2,
+                        color="navyblue")+
+    ggplot2::geom_text(data=d2, mapping=aes(x=round(upper,1), y=0,
+                                            label=round(upper,1)),
+                       size=4, angle=360, vjust=-20, hjust=-0.1)+
+    ggplot2::labs(x = xlab,
+                  y = ylab,
+                  title = title)+
+    ggplot2::theme_bw()
+  H2
+}
+
+library(RobustRankAggreg)
+library(topGO)
+library(clusterProfiler)
+library(ReactomePA)
+library(ggplot2)
+library(dplyr)
+d <- 10000 ### number of genes
+sigGenes.example <- rbinom(d, 1, 0.1)
+names(sigGenes.example) <- paste("gene", 1:d, sep="_")
+gene2GO.example <- vector(mode="list", length=d)
+names(gene2GO.example) <- names(sigGenes.example)
+GOs = paste("GO:000", 1000:9999, sep="")
+for (j in 1:d) gene2GO.example[[j]] <- sample(GOs, rnbinom(1, 1, 0.1),
+                                              replace=FALSE)
+
+resultGO = boot.GO(sigGenes=sigGenes.example, gene2GO=gene2GO.example)
+resultAggr = aggr.boot.GO(resbootGO=resultGO)
+compareRank(aggrbootGO=resultAggr, lim=100, ord="original", ident=FALSE)
+stdrank <- resultAggr$rankRun_nonBoot
+bootrank <- rank(resultAggr$Score)
+histDiff(standardRank = stdrank, bootstrappedRank = bootrank, title = "",
+         xlab = "Rank difference (standard-bootstrap)", ylab = "Frequency",
+         binwidth = 15, lowerq = .025, upperq = .975)
+
+genelist <- rnorm(10000) #example for boot.pathway
+names(genelist) <- paste( 10000:19999, sep="")
+resultpathway = boot.pathway(sigGenes=genelist , B=2, tau=0.95, org = 'mouse',
+                             pathway = 'Reactome')
+resultAggr = aggr.boot.Pathway(resbootpathway = resultpathway)
+compareRank(aggrbootGO=resultAggr, lim=100, ord="original", ident=FALSE)
+#Compare between omics levels
+genelist_T <- rnorm(10000)
+names(genelist_T) <- paste( 10000:19999, sep="")
+genelist_P <- rnorm(10000)
+names(genelist_P) <- paste( 10000:19999, sep="")
+resultpathway_T = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+                               org = 'mouse', pathway = 'Reactome')
+resultAggr_T = aggr.boot.Pathway(resbootpathway = resultpathway_T)
+resultpathway_P = boot.pathway(sigGenes=genelist , B=2, tau=0.95,
+                               org = 'mouse', pathway = 'Reactome')
+resultAggr_P = aggr.boot.Pathway(resbootpathway = resultpathway_P)
+Compareomics = aggr.multiomics(resultAggr_T = resultAggr_T,
+                               resultAggr_P = resultAggr_P)
+Compareomics <- left_join(Compareomics,
+                          resultAggr_T %>% dplyr::select(Name,rankRun_nonBoot,
+                                                         Score),
+                          by = "Name")
+colnames(Compareomics) = c("Name", "IntegratedScore", "RankTrans",
+                           "RankProt", "rankRun_nonBoot_T", "Score_T")
+Compareomics <- left_join(Compareomics,
+                          resultAggr_P %>% dplyr::select(Name,rankRun_nonBoot,
+                                                         Score),
+                          by = "Name")
+colnames(Compareomics) = c("Name", "IntegratedScore", "RankTrans",
+                           "RankProt", "rankRun_nonBoot_T", "Score_T",
+                           "rankRun_nonBoot_P", "Score_P")
+plotRank(aggrboot = Compareomics, ordercolumn = "IntegratedScore",
+         ColumnA = "rankRun_nonBoot_T", ColumnB = "RankTrans",
+         title = "Rank comparison", xlab = "Standard Enrichment analysis",
+         ylab = "Bootstrapped enrichment analysis")
+
