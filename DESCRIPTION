@@ -1,0 +1,22 @@
+Package: bootGSEA
+Type: Package
+Title: Robustness evaluation of gene set enrichment analysis (GSEA)
+Version: 1.0
+Authors@R: 
+    c(person("Shamini", "Hemandhar Kumar", email =  "shamini.hemandhar.kumar@tiho-hannover.de", role = c("aut", "cre")),
+              person("Klaus", "Jung", email =  "klaus.jung@tiho-hannover.de", role = "aut"))
+Description: Repeates GSEA using bootstrap samples of gene sets. Bootstrap results are aggregated to a new ranking score. The score can be compared to the gene set ranking resulting from the standard GSEA.
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyData: true
+Imports: 
+    RobustRankAggreg (>= 1.2.1),
+    topGO (>= 2.54.0),
+    clusterProfiler (>= 4.10.0),
+    ReactomePA (>= 1.46.0),
+    dplyr (>= 1.1.4),
+    ggplot2 (>= 3.5.0),
+    methods (>= 4.3.0),
+    org.Mm.eg.db (>= 3.18.0)
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
