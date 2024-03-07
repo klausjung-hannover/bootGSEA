@@ -19,8 +19,8 @@ Aggregation of bootstrap GO analyses
 Aggregates ranks from B bootstrap GO analyses
 }
 \examples{
-require(RobustRankAggreg)
-require(topGO)
+library(RobustRankAggreg)
+library(topGO)
 d <- 10000 ### number of genes
 sigGenes.example <- rbinom(d, 1, 0.1)
 names(sigGenes.example) <- paste("gene", 1:d, sep="_")

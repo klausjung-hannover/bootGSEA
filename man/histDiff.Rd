@@ -10,7 +10,9 @@ histDiff(
   title = "",
   xlab = "",
   ylab = "",
-  binwidth = 5
+  binwidth = 5,
+  lowerq = 0.025,
+  upperq = 0.975
 )
 }
 \arguments{
@@ -25,6 +27,10 @@ histDiff(
 \item{ylab}{Title of the yaxis}
 
 \item{binwidth}{Width of the bins}
+
+\item{lowerq}{lower quantile threshold}
+
+\item{upperq}{upper quantile threshold}
 }
 \value{
 No return value
@@ -52,7 +58,8 @@ resultAggr = aggr.boot.GO(resbootGO=resultGO)
 stdrank <- resultAggr$rankRun_nonBoot
 bootrank <- rank(resultAggr$Score)
 histDiff(standardRank = stdrank, bootstrappedRank = bootrank, title = "",
-xlab = "Rank difference (standard-bootstrap)", ylab = "Frequency", binwidth = 15)
+xlab = "Rank difference (standard-bootstrap)", ylab = "Frequency", binwidth = 15,
+ lowerq = .025, upperq = .975)
 }
 \references{
 Wickham H (2016). \emph{ggplot2: Elegant Graphics for Data Analysis}. Springer-Verlag New York. ISBN 978-3-319-24277-4, \url{https://ggplot2.tidyverse.org}
